@@ -77,7 +77,6 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 
 
 def get_cycle_time():
-    """Read cycle time from Cylc environment variable."""
     cycle_point = os.environ.get("CYLC_TASK_CYCLE_POINT")
     if cycle_point:
         try:
@@ -86,7 +85,7 @@ def get_cycle_time():
             return dt
         except ValueError:
             print(f"WARNING: Could not parse CYLC_TASK_CYCLE_POINT='{cycle_point}'")
-    INIT_TIME = datetime(2026, 4, 13, 6)
+    INIT_TIME = datetime(2026, 4, 13, 0)
     print(f"Using manual INIT_TIME: {INIT_TIME}")
     return INIT_TIME
 
@@ -158,6 +157,11 @@ def compute_rh_from_q_t(q_da, t_da, pressure_hpa=850):
     p_unit = pressure_hpa * 100 * units.pascal
     rh     = mpcalc.relative_humidity_from_specific_humidity(p_unit, t_unit, q_unit)
     return rh.to("dimensionless").magnitude * 100.0
+
+
+def open_nc(path):
+    """Open NetCDF with decode_times=False to avoid step dtype conflicts."""
+    return xr.open_dataset(path, decode_times=False)
 
 
 def prepare(ds, prev_ds, lead_hours, init_str):
@@ -352,7 +356,7 @@ def main():
 
     # Load step 0 as baseline for tp differencing
     nc_step0 = os.path.join(PROCESSED_DIR, f"{base_name}-out-0.nc")
-    prev_ds  = xr.open_dataset(nc_step0) if os.path.exists(nc_step0) else None
+    prev_ds  = open_nc(nc_step0) if os.path.exists(nc_step0) else None
 
     for step in steps:
         nc_path = os.path.join(PROCESSED_DIR, f"{base_name}-out-{step}.nc")
@@ -361,9 +365,9 @@ def main():
             continue
 
         print(f"Plotting lead +{step}h ...", flush=True)
-        ds    = xr.open_dataset(nc_path)
-        d     = prepare(ds, prev_ds, step, init_str)
-        prev_ds = xr.open_dataset(nc_path)
+        ds      = open_nc(nc_path)
+        d       = prepare(ds, prev_ds, step, init_str)
+        prev_ds = open_nc(nc_path)
         ds.close()
 
         frame = plot_frame(d)
