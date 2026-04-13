@@ -1,0 +1,8 @@
+*.grib2
+*.nc
+*.gif
+*.log
+logs/
+__pycache__/
+*.pyc
+*.ipynb
