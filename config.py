@@ -11,25 +11,23 @@ import os
 
 USER = "ang.wj"
 
-# Base directory where all data will be stored
 BASE_DIR = "/data/projects/17001770/weather_department/nwp/wjang/aifs_rt"
 
-# PBS project code
 PBS_PROJECT = "17001770"
 
-# Cylc platform name
 PLATFORM = "aspire"
 
 # ------------------------------------------------------------------------------
 # DERIVED PATHS — do not edit these
 # ------------------------------------------------------------------------------
 
-RAW_DIR       = os.path.join(BASE_DIR, "data", "raw")
-PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
-PLOTS_DIR     = os.path.join(BASE_DIR, "data", "plots")
-LOG_DIR       = os.path.join(BASE_DIR, "logs")
+RAW_DIR          = os.path.join(BASE_DIR, "data", "raw")
+PROCESSED_DIR    = os.path.join(BASE_DIR, "data", "processed")
+PLOTS_DIR        = os.path.join(BASE_DIR, "data", "plots")
+PLOTS_GIF_DIR    = os.path.join(PLOTS_DIR, "gif")
+PLOTS_FRAMES_DIR = os.path.join(PLOTS_DIR, "frames")
+LOG_DIR          = os.path.join(BASE_DIR, "logs")
 
-# File that stores measured data availability duration from cycle 3
 DURATION_FILE = os.path.join(BASE_DIR, "data_availability_duration.txt")
 
 # ------------------------------------------------------------------------------
@@ -44,7 +42,7 @@ STEADY_TIMEOUT_HOURS = 2
 # ------------------------------------------------------------------------------
 FORECAST_HOURS = 168
 STEP_HOURS     = 6
-STEPS          = list(range(0, 174, 6))  # 0 to 168h
+STEPS          = list(range(0, 174, 6))
 
 PARAMS = [
     "2t", "2d",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 plot_aifs.py
-Generates animated GIF of AIFS forecast for Southeast Asia domain.
+Generates individual PNG frames and animated GIF of AIFS forecast for Southeast Asia domain.
 Reads cycle time from CYLC_TASK_CYCLE_POINT environment variable.
 """
 
@@ -27,9 +27,9 @@ import config
 # ==============================================================================
 # CONFIGURATION — all settings come from config.py
 # ==============================================================================
-PROCESSED_DIR = config.PROCESSED_DIR
-PLOTS_DIR     = config.PLOTS_DIR
-STEPS         = config.STEPS
+PROCESSED_DIR    = config.PROCESSED_DIR
+PLOTS_GIF_DIR    = config.PLOTS_GIF_DIR
+PLOTS_FRAMES_DIR = config.PLOTS_FRAMES_DIR
 # ==============================================================================
 
 DOMAIN = {
@@ -72,8 +72,6 @@ LW_RH  = 1.2
 ALPHA_CONV = 0.90
 ALPHA_DIV  = 0.95
 ALPHA_TEMP = 0.98
-
-os.makedirs(PLOTS_DIR, exist_ok=True)
 
 
 def get_cycle_time():
@@ -160,7 +158,6 @@ def compute_rh_from_q_t(q_da, t_da, pressure_hpa=850):
 
 
 def open_nc(path):
-    """Open NetCDF with decode_times=False to avoid step dtype conflicts."""
     return xr.open_dataset(path, decode_times=False)
 
 
@@ -174,7 +171,6 @@ def prepare(ds, prev_ds, lead_hours, init_str):
     u200 = get_level_var(ds, "u", UPPER_LEVEL)
     v200 = get_level_var(ds, "v", UPPER_LEVEL)
 
-    # 6h accumulated precipitation
     tp_curr = get_2d_var(ds, "tp")
     if prev_ds is not None:
         prev_ds_sub = subset_domain(prev_ds)
@@ -327,12 +323,7 @@ def plot_frame(d):
     fig.suptitle("AIFS Forecast — SE Asia", fontsize=13)
     plt.tight_layout(rect=[0, 0, 0.91, 1])
 
-    fig.canvas.draw()
-    frame = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
-    frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (4,))
-    frame = frame[:, :, :3]
-    plt.close(fig)
-    return frame
+    return fig
 
 
 def main():
@@ -340,11 +331,18 @@ def main():
     cycle_hour = init_time.hour
     base_name  = f"aifs_{init_time.strftime('%Y-%m-%d')}_{cycle_hour:02d}z"
     init_str   = f"{init_time.strftime('%Y-%m-%d')}T{cycle_hour:02d}:00"
-    gif_path   = os.path.join(PLOTS_DIR, f"{base_name}.gif")
+    gif_path   = os.path.join(PLOTS_GIF_DIR, f"{base_name}.gif")
+
+    # Create output directories
+    os.makedirs(PLOTS_GIF_DIR, exist_ok=True)
+    frames_dir = os.path.join(PLOTS_FRAMES_DIR, base_name)
+    os.makedirs(frames_dir, exist_ok=True)
 
     print("=" * 60)
     print(" AIFS Real-Time Plot Script")
     print(f" Cycle: {init_time}")
+    print(f" GIF output   : {PLOTS_GIF_DIR}")
+    print(f" Frame output : {frames_dir}")
     print("=" * 60)
 
     if os.path.exists(gif_path):
@@ -354,7 +352,6 @@ def main():
     steps  = list(range(6, 174, 6))
     frames = []
 
-    # Load step 0 as baseline for tp differencing
     nc_step0 = os.path.join(PROCESSED_DIR, f"{base_name}-out-0.nc")
     prev_ds  = open_nc(nc_step0) if os.path.exists(nc_step0) else None
 
@@ -365,12 +362,24 @@ def main():
             continue
 
         print(f"Plotting lead +{step}h ...", flush=True)
-        ds      = open_nc(nc_path)
-        d       = prepare(ds, prev_ds, step, init_str)
+        ds    = open_nc(nc_path)
+        d     = prepare(ds, prev_ds, step, init_str)
+        fig   = plot_frame(d)
         prev_ds = open_nc(nc_path)
         ds.close()
 
-        frame = plot_frame(d)
+        # Save individual PNG frame
+        png_name = f"{base_name}-lead-{step:03d}h.png"
+        png_path = os.path.join(frames_dir, png_name)
+        fig.savefig(png_path, dpi=100, bbox_inches="tight")
+        print(f"  Saved frame: {png_name}")
+
+        # Convert to numpy array for GIF
+        fig.canvas.draw()
+        frame = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+        frame = frame[:, :, :3]
+        plt.close(fig)
         frames.append(frame)
 
     if not frames:
@@ -382,7 +391,8 @@ def main():
 
     print("\n" + "=" * 60)
     print(f" Plot complete!")
-    print(f" GIF saved to: {gif_path}")
+    print(f" GIF   : {gif_path}")
+    print(f" Frames: {frames_dir}")
     print("=" * 60)
 
 
