@@ -154,8 +154,3 @@ Check logs:
     find ~/cylc-run/aifs_rt -name "job.out" | sort
     cat ~/cylc-run/aifs_rt/run1/log/job/CYCLE_POINT/TASK/01/job.out
 
-Common issues:
-- AIFS data not available: ECMWF open data may have delays, download will retry every 10 min
-- Missing processed files: check process_aifs log for GRIB2 parsing errors
-- CYLC_WORKFLOW_INITIAL_CYCLE_POINT not set: fallback used, workflow still runs correctly
-- Never run start_workflow.sh multiple times without stopping the previous run first
