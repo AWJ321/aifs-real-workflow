@@ -2,16 +2,18 @@
 """
 Real-time download script for AIFS workflow.
 Probe window logic:
-  - Cycle 1: data already confirmed available by detect_start.py — no probing needed
-  - Cycle 2: probe every 10 min for up to 7 hours
-  - Cycle 3: probe every 10 min for up to 7 hours, records data availability duration
-  - Cycle 4+: adaptive wait task already slept, probe every 10 min for 2 hours
+- Catch-up cycles (cycle point < latest available): download immediately
+- New Cycle 1 (cycle point == latest available): download immediately, write caught_up.txt
+- New Cycle 2 (latest available + 6h): probe every 10 min for up to 7 hours
+- New Cycle 3 (latest available + 12h): probe every 10 min for up to 7 hours, records duration
+- New Cycle 4+ (latest available + 18h+): adaptive wait already slept, probe for 2 hours
 """
 
 import os
 import sys
 import time
 import pathlib
+import subprocess
 from datetime import datetime, timedelta
 from ecmwf.opendata import Client
 
@@ -28,6 +30,8 @@ STEADY_TIMEOUT_HOURS = config.STEADY_TIMEOUT_HOURS
 DURATION_FILE        = config.DURATION_FILE
 STEPS                = config.STEPS
 PARAMS               = config.PARAMS
+CAUGHT_UP_FILE       = os.path.join(config.BASE_DIR, "caught_up.txt")
+SCRIPTS_DIR          = os.path.dirname(os.path.abspath(__file__))
 # ==============================================================================
 
 
@@ -35,22 +39,35 @@ def setup_dirs():
     pathlib.Path(RAW_DIR).mkdir(parents=True, exist_ok=True)
 
 
-def get_initial_cycle_point():
-    """
-    Read the initial cycle point from Cylc environment variable.
-    Falls back to a manual value if running outside Cylc.
-    """
-    icp = os.environ.get("CYLC_WORKFLOW_INITIAL_CYCLE_POINT")
-    if icp:
-        return datetime.strptime(icp, "%Y%m%dT%H%MZ")
-    print("WARNING: CYLC_WORKFLOW_INITIAL_CYCLE_POINT not set, using fallback")
-    return datetime(2026, 4, 13, 6)
+def get_latest_available():
+    """Run detect_start.py to get latest available AIFS cycle point."""
+    try:
+        result = subprocess.run(
+            ["python", os.path.join(SCRIPTS_DIR, "detect_start.py")],
+            capture_output=True, text=True, timeout=120
+        )
+        cp = result.stdout.strip()
+        if cp:
+            return datetime.strptime(cp, "%Y%m%dT%H%MZ")
+    except Exception as e:
+        print(f"WARNING: detect_start.py failed: {e}")
+    return None
+
+
+def get_caught_up_cycle():
+    if os.path.exists(CAUGHT_UP_FILE):
+        with open(CAUGHT_UP_FILE) as f:
+            return datetime.strptime(f.read().strip(), "%Y%m%dT%H%MZ")
+    return None
+
+
+def write_caught_up(cycle_point):
+    with open(CAUGHT_UP_FILE, "w") as f:
+        f.write(cycle_point.strftime("%Y%m%dT%H%MZ"))
+    print(f"  [CAUGHT UP] Written to {CAUGHT_UP_FILE}: {cycle_point}")
 
 
 def get_cycle_time():
-    """
-    Read the current cycle's time from Cylc environment variable.
-    """
     cycle_point = os.environ.get("CYLC_TASK_CYCLE_POINT")
     if cycle_point:
         try:
@@ -65,36 +82,52 @@ def get_cycle_time():
 
 
 def get_cycle_info(init_time):
-    """
-    Cycle 1 = initial cycle point       -> attempt once
-    Cycle 2 = initial cycle point + 6h  -> probe up to 7h
-    Cycle 3 = initial cycle point + 12h -> probe up to 7h, record duration
-    Cycle 4+ = anything after           -> probe up to 2h
-    Returns (max_wait_mins, is_cycle3)
-    """
-    initial_cp = get_initial_cycle_point()
-    cycle2_cp  = initial_cp + timedelta(hours=6)
-    cycle3_cp  = initial_cp + timedelta(hours=12)
+    caught_up_cp = get_caught_up_cycle()
 
-    if init_time == initial_cp:
-        print(f"  Cycle 1 — data already confirmed available, attempting once")
+    if caught_up_cp is None:
+        print("  Checking latest available data...")
+        latest = get_latest_available()
+
+        if latest is None:
+            print("  WARNING: Could not get latest available, treating as catch-up")
+            return 0, False
+
+        print(f"  Latest available: {latest}")
+
+        if init_time < latest:
+            print(f"  Catch-up cycle — downloading immediately")
+            return 0, False
+        elif init_time == latest:
+            print(f"  Caught up! This is new Cycle 1 — downloading immediately")
+            write_caught_up(init_time)
+            return 0, False
+        else:
+            print(f"  Cycle point ahead of latest available — treating as new Cycle 2")
+            write_caught_up(init_time - timedelta(hours=6))
+            caught_up_cp = init_time - timedelta(hours=6)
+
+    cycle2_cp = caught_up_cp + timedelta(hours=6)
+    cycle3_cp = caught_up_cp + timedelta(hours=12)
+
+    if init_time == caught_up_cp:
+        print(f"  New Cycle 1 — data already confirmed available, attempting once")
         return 0, False
     elif init_time == cycle2_cp:
-        print(f"  Cycle 2 — probing up to {CYCLE2_TIMEOUT_HOURS}h for new data")
+        print(f"  New Cycle 2 — probing up to {CYCLE2_TIMEOUT_HOURS}h for new data")
         return CYCLE2_TIMEOUT_HOURS * 60, False
     elif init_time == cycle3_cp:
-        print(f"  Cycle 3 — probing up to {CYCLE2_TIMEOUT_HOURS}h, will record data availability duration")
+        print(f"  New Cycle 3 — probing up to {CYCLE2_TIMEOUT_HOURS}h, will record duration")
         return CYCLE2_TIMEOUT_HOURS * 60, True
     else:
-        print(f"  Cycle 4+ — adaptive wait already done, probing up to {STEADY_TIMEOUT_HOURS}h")
+        print(f"  New Cycle 4+ — adaptive wait already done, probing up to {STEADY_TIMEOUT_HOURS}h")
         return STEADY_TIMEOUT_HOURS * 60, False
 
 
 def save_duration(probe_start_time, data_found_time):
-    """
-    Save the measured data availability duration to a file.
-    Read by wait_adaptive.sh to determine sleep time for cycle 4+.
-    """
+    if os.path.exists(DURATION_FILE):
+        print(f"  Duration file already exists — keeping existing value, not overwriting")
+        return
+
     duration_secs           = int((data_found_time - probe_start_time).total_seconds())
     duration_hrs            = duration_secs // 3600
     duration_mins_remainder = (duration_secs % 3600) // 60
@@ -106,7 +139,7 @@ def save_duration(probe_start_time, data_found_time):
         f.write(f"{duration_secs}\n")
 
     print(f"\n  {'='*55}")
-    print(f"  DATA AVAILABILITY DURATION (Cycle 3 measurement)")
+    print(f"  DATA AVAILABILITY DURATION (New Cycle 3 measurement)")
     print(f"  Probing started : {probe_start_time.strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"  Data found at   : {data_found_time.strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"  Duration        : {duration_hrs}h {duration_mins_remainder}m ({duration_secs}s)")
@@ -116,10 +149,6 @@ def save_duration(probe_start_time, data_found_time):
 
 
 def try_download(dt, out_path):
-    """
-    Attempt to download AIFS forecast for given cycle time.
-    Returns True if successful, False otherwise.
-    """
     try:
         client = Client(source="ecmwf", model="aifs-single")
         client.retrieve(
@@ -138,10 +167,6 @@ def try_download(dt, out_path):
 
 
 def download_with_retry(dt, max_wait_mins, is_cycle3=False):
-    """
-    Download AIFS forecast with retry logic.
-    For cycle 3, records how long it took for data to appear.
-    """
     out_filename = f"aifs_{dt.strftime('%Y-%m-%d')}_{dt.hour:02d}z.grib2"
     out_path     = os.path.join(RAW_DIR, out_filename)
     max_retries  = max(1, int(max_wait_mins // RETRY_INTERVAL_MINS))
@@ -152,7 +177,6 @@ def download_with_retry(dt, max_wait_mins, is_cycle3=False):
 
     print(f"  [DOWNLOAD] {out_filename} ...")
 
-    # Start timer for cycle 3
     if is_cycle3:
         probe_start = datetime.utcnow()
         print(f"  [CYCLE 3] Timer started: {probe_start.strftime('%Y-%m-%d %H:%M UTC')}")

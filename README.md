@@ -5,7 +5,7 @@ Real-time AI weather forecasting pipeline running on HPC cluster using Cylc 8 an
 Every 6 hours:
 1. Downloads latest ECMWF AIFS forecast from ECMWF open data
 2. Converts GRIB2 to per-lead-time NetCDF files
-3. Generates animated GIF of SE Asia weather forecast
+3. Generates animated GIF and individual PNG frames of SE Asia weather forecast
 
 ---
 
@@ -17,9 +17,10 @@ Every 6 hours:
     |-- scripts/
     |   |-- config.py              # All configuration — edit this first
     |   |-- detect_start.py        # Detects latest available AIFS cycle
+    |   |-- detect_oldest.py       # Detects oldest available AIFS cycle
     |   |-- download_aifs.py       # Downloads AIFS GRIB2 from ECMWF open data
     |   |-- process_aifs.py        # Converts GRIB2 to per-lead-time NetCDF
-    |   |-- plot_aifs.py           # Generates forecast GIF animation
+    |   |-- plot_aifs.py           # Generates forecast GIF and PNG frames
     |-- bash/
     |   |-- download_aifs.sh
     |   |-- process_aifs.sh
@@ -62,12 +63,13 @@ Open config.py and update:
     python -c "
     import sys; sys.path.insert(0, '/data/projects/17001770/weather_department/nwp/wjang/aifs_rt')
     import config, os
-    for d in [config.RAW_DIR, config.PROCESSED_DIR, config.PLOTS_DIR, config.LOG_DIR]:
+    for d in [config.RAW_DIR, config.PROCESSED_DIR, config.PLOTS_DIR,
+              config.PLOTS_GIF_DIR, config.PLOTS_FRAMES_DIR, config.LOG_DIR]:
         os.makedirs(d, exist_ok=True)
         print(f'Created: {d}')
     "
 
-### 4. Create conda environment
+### 4. Create conda environment and install packages
 
     source /app/apps/miniforge3/25.3.1/etc/profile.d/conda.sh
     conda create -n aifs_rt_env python=3.11 -y
@@ -108,41 +110,74 @@ Replace YOUR_USERNAME with your actual username.
 
     cylc stop --kill aifs_rt
 
-### Clean and restart
+---
 
-    cylc stop --kill aifs_rt
-    cylc clean aifs_rt --yes
-    bash start_workflow.sh
+## After System Maintenance / Server Restart
+
+The workflow does not restart automatically after maintenance. To restart manually:
+
+### 1. Restart the workflow
+
+    conda activate aifs_rt_env
+    bash /data/projects/17001770/weather_department/nwp/wjang/aifs_rt/start_workflow.sh
+
+start_workflow.sh automatically:
+- Detects oldest available AIFS data (ECMWF open data only keeps last few days)
+- Finds the last completed cycle from data/plots/gif/
+- If last completed cycle is older than oldest available: starts from oldest available
+- If last completed cycle is within available range: starts from there + 6h
+- Runs missed cycles back to back with no waiting
+- Resumes normal operation once caught up to latest available data
+
+### 2. Monitor catch-up progress
+
+    cylc tui aifs_rt
+
+### 3. Verify catch-up completed
+
+    cat /data/projects/17001770/weather_department/nwp/wjang/aifs_rt/caught_up.txt
+
+This file is written when the workflow reaches the latest available data.
+Once it exists, normal scheduling resumes.
 
 ---
 
 ## Scheduling Logic
 
-Cycle 1  — Starts immediately, data already confirmed available by detect_start.py
-Cycle 2  — Starts immediately after Cycle 1 finishes, probes every 10 min for up to 7h
-Cycle 3  — Starts immediately after Cycle 2 finishes, probes every 10 min for up to 7h, records data availability duration
-Cycle 4+ — Waits (duration - 30 min) after previous cycle finishes, then probes every 10 min for 2h
+Catch-up cycles — if missed cycles exist, runs all back to back immediately with no waiting
+New Cycle 1   — latest available data, downloads immediately
+New Cycle 2   — starts immediately after Cycle 1, probes every 10 min for up to 7h
+New Cycle 3   — starts immediately after Cycle 2, probes every 10 min for up to 7h, records data availability duration
+New Cycle 4+  — waits (measured duration - 30 min), then probes every 10 min for 2h
+
+Data availability duration measured in Cycle 3 is saved to data_availability_duration.txt
+If file already exists it is not overwritten — preserved across restarts
+ECMWF open data typically keeps last 3-5 days — cycles older than this cannot be caught up
 
 ---
 
 ## Output
 
-Animated GIF files saved to:
+    data/plots/
+    |-- gif/
+    |   |-- aifs_YYYY-MM-DD_HHz.gif
+    |-- frames/
+        |-- aifs_YYYY-MM-DD_HHz/
+            |-- aifs_YYYY-MM-DD_HHz-lead-006h.png
+            |-- ... (28 files)
 
-    {BASE_DIR}/data/plots/aifs_YYYY-MM-DD_HHz.gif
+Download GIFs to local machine:
 
-Download to local machine:
-
-    scp your_username@aspire2a.nscc.sg:/data/projects/17001770/weather_department/nwp/wjang/aifs_rt/data/plots/*.gif C:\Users\your_username\Desktop\
+    scp your_username@aspire2a.nscc.sg:/data/projects/17001770/weather_department/nwp/wjang/aifs_rt/data/plots/gif/*.gif C:\Users\your_username\Desktop\
 
 ---
 
 ## PBS Resources
 
     Task             CPUs   GPUs   RAM     Walltime   Queue
-    download_aifs     2      0      8gb     8h         normal
-    process_aifs      4      0     32gb     1h         normal
-    plot_aifs         4      0     32gb     1h         normal
+    download_aifs     1      0      8gb     8h         normal
+    process_aifs      1      0     32gb     1h         normal
+    plot_aifs         1      0     32gb     1h         normal
     wait_adaptive     1      0      1gb     10h        normal
 
 ---
@@ -154,3 +189,9 @@ Check logs:
     find ~/cylc-run/aifs_rt -name "job.out" | sort
     cat ~/cylc-run/aifs_rt/run1/log/job/CYCLE_POINT/TASK/01/job.out
 
+Common issues:
+- Download fails with 404: data older than ECMWF open data retention period, start_workflow.sh will automatically use oldest available instead
+- CYLC_WORKFLOW_INITIAL_CYCLE_POINT not set: fallback used, workflow still runs correctly
+- PBS queue wait times can be long during peak hours
+- Never run start_workflow.sh multiple times without stopping the previous run first
+- If caught_up.txt exists from a previous run, start_workflow.sh deletes it automatically
