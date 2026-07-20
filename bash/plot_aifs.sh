@@ -20,7 +20,7 @@ python ${WORKFLOW_BASE_DIR}/scripts/plot_aifs.py
 
 EXIT_CODE=$?
 
-echo "=============================="
+echo "============================="
 echo " AIFS Plot Finished"
 echo " Exit code: $EXIT_CODE"
 echo " Time: $(date)"

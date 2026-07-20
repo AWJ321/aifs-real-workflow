@@ -6,7 +6,7 @@
 #PBS -j oe
 #PBS -o /data/projects/17001770/weather_department/nwp/wjang/aifs_rt/logs/process_aifs.log
 
-echo "=============================="
+echo "============================="
 echo " AIFS Process Started"
 echo " Host: $(hostname)"
 echo " Time: $(date)"

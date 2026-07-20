@@ -15,7 +15,6 @@ import time
 import pathlib
 import subprocess
 from datetime import datetime, timedelta
-from ecmwf.opendata import Client
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -41,16 +40,21 @@ def setup_dirs():
 
 def get_latest_available():
     """Run detect_start.py to get latest available AIFS cycle point."""
-    try:
-        result = subprocess.run(
-            ["python", os.path.join(SCRIPTS_DIR, "detect_start.py")],
-            capture_output=True, text=True, timeout=120
-        )
-        cp = result.stdout.strip()
-        if cp:
-            return datetime.strptime(cp, "%Y%m%dT%H%MZ")
-    except Exception as e:
-        print(f"WARNING: detect_start.py failed: {e}")
+    python_path = "/home/users/gov/nea/ang.wj/.conda/envs/aifs_rt_env/bin/python"
+    for attempt in range(3):
+        try:
+            result = subprocess.run(
+                [python_path, os.path.join(SCRIPTS_DIR, "detect_start.py")],
+                capture_output=True, text=True, timeout=120
+            )
+            cp = result.stdout.strip()
+            if cp:
+                return datetime.strptime(cp, "%Y%m%dT%H%MZ")
+        except Exception as e:
+            print(f"WARNING: detect_start.py attempt {attempt+1} failed: {e}")
+        if attempt < 2:
+            print(f"  Retrying in 5 minutes...")
+            time.sleep(300)
     return None
 
 
@@ -89,8 +93,8 @@ def get_cycle_info(init_time):
         latest = get_latest_available()
 
         if latest is None:
-            print("  WARNING: Could not get latest available, treating as catch-up")
-            return 0, False
+            print("  WARNING: Could not get latest available — probing for 7h")
+            return CYCLE2_TIMEOUT_HOURS * 60, False
 
         print(f"  Latest available: {latest}")
 
@@ -124,8 +128,9 @@ def get_cycle_info(init_time):
 
 
 def save_duration(probe_start_time, data_found_time):
-    if os.path.exists(DURATION_FILE):
-        print(f"  Duration file already exists — keeping existing value, not overwriting")
+    # Only save if caught_up.txt exists — meaning this is a real cycle 3, not catch-up
+    if not os.path.exists(CAUGHT_UP_FILE):
+        print(f"  No caught_up.txt — catch-up cycle 3, not recording duration")
         return
 
     duration_secs           = int((data_found_time - probe_start_time).total_seconds())
@@ -149,6 +154,9 @@ def save_duration(probe_start_time, data_found_time):
 
 
 def try_download(dt, out_path):
+    # Import here instead of top of file to avoid triggering ECMWF rate limiting
+    # before detect_start.py runs
+    from ecmwf.opendata import Client
     try:
         client = Client(source="ecmwf", model="aifs-single")
         client.retrieve(

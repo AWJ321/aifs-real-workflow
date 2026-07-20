@@ -12,7 +12,7 @@ import contextlib
 from datetime import datetime, timedelta
 from ecmwf.opendata import Client
 
-MAX_LOOKBACK_DAYS = 10
+MAX_LOOKBACK_DAYS = 5
 
 def get_latest_cycle():
     # Get current UTC time and round down to nearest 6h cycle
