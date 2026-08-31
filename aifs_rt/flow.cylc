@@ -8,17 +8,25 @@
     [[graph]]
         R1/^ = """
             download_aifs => process_aifs => plot_aifs => transfer
+            process_aifs => plot_precip_aifs => transfer
+            process_aifs => plot_wind_aifs => transfer
         """
         R1/+PT6H = """
             download_aifs => process_aifs => plot_aifs => transfer
+            process_aifs => plot_precip_aifs => transfer
+            process_aifs => plot_wind_aifs => transfer
             plot_aifs[-PT6H] => download_aifs
         """
         R1/+PT12H = """
             download_aifs => process_aifs => plot_aifs => transfer
+            process_aifs => plot_precip_aifs => transfer
+            process_aifs => plot_wind_aifs => transfer
             plot_aifs[-PT6H] => download_aifs
         """
         R/+PT18H/PT6H = """
             plot_aifs[-PT6H] => wait_adaptive => download_aifs => process_aifs => plot_aifs => transfer
+            process_aifs => plot_precip_aifs => transfer
+            process_aifs => plot_wind_aifs => transfer
         """
 
 [runtime]
@@ -51,6 +59,20 @@
         [[[directives]]]
             -l select=1:ncpus=1:mem=32gb
             -l walltime=01:00:00
+
+    [[plot_precip_aifs]]
+        script = bash ${WORKFLOW_BASE_DIR}/bash/plot_precip_aifs.sh
+        execution retry delays = 10*PT30M
+        [[[directives]]]
+            -l select=1:ncpus=1:mem=32gb
+            -l walltime=01:00:00
+
+    [[plot_wind_aifs]]
+        script = bash ${WORKFLOW_BASE_DIR}/bash/plot_wind_aifs.sh
+        execution retry delays = 10*PT30M
+        [[[directives]]]
+            -l select=1:ncpus=1:mem=32gb
+            -l walltime=02:00:00
 
     [[transfer]]
         script = bash ${WORKFLOW_BASE_DIR}/bash/transfer.sh

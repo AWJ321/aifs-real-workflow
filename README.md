@@ -6,7 +6,6 @@ Every 6 hours:
 1. Downloads latest ECMWF AIFS forecast from ECMWF open data
 2. Converts GRIB2 to per-lead-time NetCDF files
 3. Generates animated GIF and individual PNG frames of SE Asia weather forecast
-4. Transfers outputs to remote server
 
 ---
 
@@ -22,12 +21,13 @@ Every 6 hours:
     |   |-- download_aifs.py       # Downloads AIFS GRIB2 from ECMWF open data
     |   |-- process_aifs.py        # Converts GRIB2 to per-lead-time NetCDF
     |   |-- plot_aifs.py           # Generates forecast GIF and PNG frames
+    |   |-- plot_precip_aifs.py    # Generates precipitation log-colorscale plots
+    |   |-- plot_wind_aifs.py      # Generates wind speed and barb plots (925/850/700hPa)
     |-- bash/
     |   |-- download_aifs.sh
     |   |-- process_aifs.sh
     |   |-- plot_aifs.sh
     |   |-- wait_adaptive.sh
-    |   |-- transfer.sh
     |-- start_workflow.sh          # Main entry point
     |-- config.py                  # All paths and settings — edit this first
 
@@ -74,7 +74,7 @@ Open config.py and update:
 ### 4. Create conda environment and install packages
 
     source /app/apps/miniforge3/25.3.1/etc/profile.d/conda.sh
-    conda create -n aifs_rt_env python=3.10 -y
+    conda create -n aifs_rt_env python=3.11 -y
     conda activate aifs_rt_env
     pip install cylc-flow
     pip install ecmwf-opendata
@@ -96,11 +96,6 @@ Create ~/.cylc/flow/global.cylc:
     EOF
 
 Replace YOUR_USERNAME with your actual username.
-
-### 6. Set up SSH key for remote transfer
-
-    ssh-keygen -t rsa -b 4096
-    ssh-copy-id aramanathan@118.189.84.226
 
 ---
 
@@ -155,10 +150,10 @@ Catch-up cycles — if missed cycles exist, runs all back to back immediately wi
 New Cycle 1   — latest available data, downloads immediately
 New Cycle 2   — starts immediately after Cycle 1, probes every 10 min for up to 7h
 New Cycle 3   — starts immediately after Cycle 2, probes every 10 min for up to 7h, records data availability duration
-New Cycle 4+  — wait_adaptive checks if data already available, skips sleep if so; otherwise sleeps (measured duration - 30 min), then probes every 10 min for up to 4h
+New Cycle 4+  — waits (measured duration - 30 min), then probes every 10 min for 2h
 
-Data availability duration is measured dynamically in new Cycle 3 and saved to data_availability_duration.txt
-Only written if caught_up.txt exists — ensures catch-up cycles never corrupt the measurement
+Data availability duration measured in Cycle 3 is saved to data_availability_duration.txt
+If file already exists it is not overwritten — preserved across restarts
 ECMWF open data typically keeps last 3-5 days — cycles older than this cannot be caught up
 
 ---
@@ -169,9 +164,23 @@ ECMWF open data typically keeps last 3-5 days — cycles older than this cannot 
     |-- gif/
     |   |-- aifs_YYYY-MM-DD_HHz.gif
     |-- frames/
-        |-- aifs_YYYY-MM-DD_HHz/
-            |-- aifs_YYYY-MM-DD_HHz-lead-006h.png
-            |-- ... (28 files)
+    |   |-- aifs_YYYY-MM-DD_HHz/
+    |       |-- aifs_YYYY-MM-DD_HHz-lead-006h.png
+    |       |-- ... (28 files)
+    data/plots_precip/
+    |-- gif/
+    |   |-- aifs_precip_aifs_YYYY-MM-DD_HHz.gif
+    |-- frames/
+    |   |-- aifs_YYYY-MM-DD_HHz/ (28 files)
+    data/plots_wind/
+    |-- gif/
+    |   |-- aifs_wind925hPa_aifs_YYYY-MM-DD_HHz.gif
+    |   |-- aifs_wind850hPa_aifs_YYYY-MM-DD_HHz.gif
+    |   |-- aifs_wind700hPa_aifs_YYYY-MM-DD_HHz.gif
+    |-- frames/
+        |-- 925hPa/aifs_YYYY-MM-DD_HHz/ (28 files)
+        |-- 850hPa/aifs_YYYY-MM-DD_HHz/ (28 files)
+        |-- 700hPa/aifs_YYYY-MM-DD_HHz/ (28 files)
 
 Download GIFs to local machine:
 
@@ -181,12 +190,11 @@ Download GIFs to local machine:
 
 ## PBS Resources
 
-    Task             CPUs   GPUs   RAM     Walltime   Queue   Retries
-    download_aifs     1      0      8gb     8h         normal  10
-    process_aifs      1      0     32gb     1h         normal  10
-    plot_aifs         1      0     32gb     1h         normal  10
-    transfer          1      0      4gb     30min      normal  10
-    wait_adaptive     1      0      1gb     10h        normal  —
+    Task             CPUs   GPUs   RAM     Walltime   Queue
+    download_aifs     1      0      8gb     8h         normal
+    process_aifs      1      0     32gb     1h         normal
+    plot_aifs         1      0     32gb     1h         normal
+    wait_adaptive     1      0      1gb     10h        normal
 
 ---
 
@@ -203,4 +211,3 @@ Common issues:
 - PBS queue wait times can be long during peak hours
 - Never run start_workflow.sh multiple times without stopping the previous run first
 - If caught_up.txt exists from a previous run, start_workflow.sh deletes it automatically
-- SSH key for transfer needs to be re-added after Aspire2A maintenance: ssh-copy-id aramanathan@118.189.84.226
