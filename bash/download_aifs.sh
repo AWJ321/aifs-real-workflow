@@ -2,7 +2,7 @@
 #PBS -N aifs_download
 #PBS -P 17001770
 #PBS -l select=1:ncpus=1:mem=8gb
-#PBS -l walltime=08:00:00
+#PBS -l walltime=24:00:00
 #PBS -j oe
 #PBS -o /data/projects/17001770/weather_department/nwp/wjang/aifs_rt/logs/download_aifs.log
 
