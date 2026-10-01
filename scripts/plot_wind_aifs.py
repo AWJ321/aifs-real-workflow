@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-from datetime import datetime
+from datetime import datetime, timedelta
 import imageio
 import warnings
 warnings.filterwarnings("ignore")
@@ -86,7 +86,9 @@ def plot_frame(base_name, step, level, ds, init_str):
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 8),
                            subplot_kw={"projection": ccrs.PlateCarree()})
-    base(ax, f"AIFS {level}hPa Wind | Init {init_str} | Lead +{step}h")
+    valid_dt  = datetime.strptime(init_str, "%Y-%m-%dT%H:%M") + timedelta(hours=step)
+    valid_str = valid_dt.strftime("%Y-%m-%d %HZ")
+    base(ax, f"AIFS {level}hPa Wind | Init {init_str} | Lead +{step}h | Valid {valid_str}")
 
     cf = ax.contourf(
         lon, lat, wspd_kt,
